@@ -49,8 +49,10 @@ export default function App() {
     /* ======================
          CONFIG (clarity + control)
       ====================== */
-    const DRAG_SENSITIVITY = 0.00038; // slower wind -> clearer
-    const MAX_V = 0.028; // limit max scrub speed
+    const DRAG_SENSITIVITY = 0.00038; // base sensitivity
+    const REWIND_MULT = 2.0; // ✅ faster rewind (CCW)
+    const MAX_PLAY = 0.028; // max forward (play)
+    const MAX_REW = 0.06; // max rewind
     const FRICTION = 0.935;
     const DEADZONE = 0.00006;
 
@@ -297,11 +299,21 @@ export default function App() {
         const delta = normalize(a - lastAngleRef.current);
         lastAngleRef.current = a;
 
-        // CCW = forward, CW = rewind
-        velocityRef.current += delta * DRAG_SENSITIVITY;
-        velocityRef.current = clamp(velocityRef.current, -MAX_V, MAX_V);
-
+        // Visual knob rotation stays natural
         setAngle((prev) => prev + delta);
+
+        // ✅ NEW MAPPING:
+        // Clockwise (delta > 0) = PLAY  => positive velocity
+        // Counter-clockwise (delta < 0) = REWIND => negative velocity
+        const audioDelta = delta;
+
+        // ✅ Faster rewind only (rewind = negative)
+        const mult = audioDelta < 0 ? REWIND_MULT : 1;
+
+        velocityRef.current += audioDelta * DRAG_SENSITIVITY * mult;
+
+        // Clamp: rewind is negative, play is positive
+        velocityRef.current = clamp(velocityRef.current, -MAX_REW, MAX_PLAY);
     };
 
     const onPointerUp = (e) => {
@@ -348,7 +360,8 @@ export default function App() {
         g.fillRect(0, 0, w, h);
 
         const v = tapeSpeedRef.current;
-        const intensity = Math.min(1, Math.abs(v) / MAX_V);
+        const denom = v >= 0 ? MAX_PLAY : MAX_REW;
+        const intensity = Math.min(1, Math.abs(v) / denom);
 
         const bars = 40;
         const gap = Math.max(2, Math.floor(w * 0.008));
@@ -410,7 +423,7 @@ export default function App() {
         // rewind squeal
         if (squealGainRef.current) {
             if (v < -DEADZONE) {
-                const amt = Math.min(0.2, (Math.abs(v) / MAX_V) * 0.2);
+                const amt = Math.min(0.2, (Math.abs(v) / MAX_REW) * 0.2);
                 squealGainRef.current.gain.setTargetAtTime(amt, now, 0.03);
             } else {
                 squealGainRef.current.gain.setTargetAtTime(0.0, now, 0.04);
@@ -419,7 +432,8 @@ export default function App() {
 
         if (Math.abs(v) <= DEADZONE) return;
 
-        const speedNorm = Math.min(1, Math.abs(v) / MAX_V);
+        const denom = v >= 0 ? MAX_PLAY : MAX_REW;
+        const speedNorm = Math.min(1, Math.abs(v) / denom);
         const step = lerp(STEP_MAX, STEP_MIN, speedNorm);
 
         if (nextGrainTimeRef.current < now) nextGrainTimeRef.current = now;
@@ -429,7 +443,6 @@ export default function App() {
             const buf = forward ? bufF : bufR;
 
             let offset = forward ? playheadRef.current : Math.max(0, duration - playheadRef.current);
-
             offset = clamp(offset, 0, Math.max(0, buf.duration - GRAIN_SIZE));
 
             const src = ctx.createBufferSource();
@@ -628,11 +641,8 @@ export default function App() {
                     </div>
                 </div>
 
-                <p
-                    className="text-center text-xs text-[#7a7268] pb-6 relative"
-                    style={{ fontFamily: handwrittenFont }}
-                >
-                    Counter-clockwise to play • Clockwise to rewind • Wind slowly for clearer audio
+                <p className="text-center text-xs text-[#7a7268] pb-6 relative" style={{ fontFamily: handwrittenFont }}>
+                    Clockwise to play • Counter-clockwise to rewind • Wind slowly for clearer audio
                 </p>
             </div>
         </div>
